@@ -1,0 +1,13 @@
+FROM imrehg/gentoo-aarch64-builder
+
+# Firmware step
+ENV RPI_FIRMWARE=1.20190819
+RUN git clone -b ${RPI_FIRMWARE} --depth=1 https://github.com/raspberrypi/firmware
+
+# Kernel step
+ENV RPI_KERNEL=raspberrypi-kernel_1.20190819-1
+RUN git clone -b ${RPI_KERNEL} --depth=1 https://github.com/raspberrypi/linux
+
+COPY builder.sh ./
+
+RUN ["bash", "builder.sh"]
