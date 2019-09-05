@@ -4,7 +4,8 @@ RPI_VERSION=${RPI_VERSION:=4}
 BUILD_DIR="/build"
 
 case $RPI_VERSION in
-    3) defconfig="bcmrpi3_defconfig"
+    3) echo "Targeting Raspberry Pi version: 3"
+       defconfig="bcmrpi3_defconfig"
        dtb=('bcm2710-rpi-3-b-plus.dtb'
             'bcm2710-rpi-3-b.dtb'
             'bcm2710-rpi-cm3.dtb'
@@ -22,7 +23,8 @@ case $RPI_VERSION in
                   'LICENCE.broadcom'
                   )
        ;;
-    4) defconfig="bcm2711_defconfig"
+    4) echo "Targeting Raspberry Pi version: 4"
+       defconfig="bcm2711_defconfig"
        dtb=('bcm2711-rpi-4-b.dtb')
        bootfiles=('start.elf'
                   'start4x.elf'
@@ -36,21 +38,56 @@ case $RPI_VERSION in
                   'LICENCE.broadcom'
                   )
         ;;
-    *) echo "Unknown RPI_VERSION value, bailing"
-       exit 1
+    *) echo "Unknown or empty RPI_VERSION value, bailing"
+      #  exit 1
 esac
 
-## Install boot firmware
+echo "Cleaning up build directory."
+rm -rf "${BUILD_DIR:?}/"*
+
+### Firmware
+echo "Installing boot firmware"
 for bootfile in "${bootfiles[@]}"; do
     install -D "firmware/boot/${bootfile}" "${BUILD_DIR}/boot/${bootfile}"
 done
+echo "Installing device tree overlays"
+pushd firmware/boot/overlays/ || exit
+for overlayfile in *; do
+   install -D -m755 "${overlayfile}" "${BUILD_DIR}/boot/overlays/${overlayfile}"
+done
+popd || exit
 
-## Compile the kernel
-cd linux || exit
+### Kernel
+echo "Compiling kernel from ${defconfig}"
+pushd linux || exit
 export ARCH=arm64
 export CROSS_COMPILE=aarch64-unknown-linux-gnu-
 make "${defconfig}"
-make
+make -j$(nproc)
+install -D -m755 ./arch/arm64/boot/Image "${BUILD_DIR}/boot/kernel8.img"
 
-install -D -m644 arch/arm64/boot/Image "${BUILD_DIR}/boot/kernel8.img"
+### Modules
+echo "Installing modules"
 make modules_install INSTALL_MOD_PATH="${BUILD_DIR}"
+
+### Place compiled dtb files
+echo "Copying dtb files"
+for dtb_file in "${dtb[@]}"; do
+   install -D -m755 "./arch/arm64/boot/dts/broadcom/${dtb_file}" "${BUILD_DIR}/boot/${dtb_file}"
+done
+
+popd || exit
+
+## Armstub only needed for Raspberry Pi 4
+if [[ $RPI_VERSION == 4 ]]; then
+   echo "Installing armstub"
+   pushd tools/armstubs || exit
+   make CC8=aarch64-unknown-linux-gnu-gcc \
+      LD8=aarch64-unknown-linux-gnu-ld \
+      OBJCOPY8=aarch64-unknown-linux-gnu-objcopy \
+      OBJDUMP8=aarch64-unknown-linux-gnu-objdump \
+      armstub8-gic.bin
+   install -m755 armstub8-gic.bin "${BUILD_DIR}/boot/"
+   popd || exit
+fi
+echo "Finished."
